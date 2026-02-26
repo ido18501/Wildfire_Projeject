@@ -157,15 +157,6 @@ python download_data.py --output_dir /path/to/sim2real_fire_data/simulation_data
 
 **Neural encoder.** The `FlexibleCovariateEncoder` combines a global MLP (for domain-wide weather features) with a fully-convolutional network (for spatial terrain/fuel covariates). Outputs are projected to satisfy feasibility constraints: G is made positive-definite via eigenvalue clamping, and the drift norm is rescaled to satisfy the Randers condition ‖b‖_{G⁻¹} < 1.
 
-## Citation
-
-```bibtex
-@inproceedings{gahtan2025wildfire,
-    title={Wildfire Simulation with Differentiable Randers-Finsler Eikonal Solvers},
-    author={Gahtan, Barak and Shpund, Jacob and Bronstein, Alex M.},
-    booktitle={Symposium on Geometry Processing (SGP)},
-    year={2025}
-}
 ```
 
 ## License
