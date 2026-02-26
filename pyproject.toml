@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "differentiable-eikonal-wildfire"
+version = "1.0.0"
+description = "Differentiable Randers-Finsler eikonal solver for wildfire propagation modeling"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+authors = [
+    {name = "Barak Gahtan", email = "barakgatan@cs.technion.ac.il"},
+    {name = "Jacob Shpund", email = "shpung@gmail.com"},
+    {name = "Alex M. Bronstein", email = "bron@cs.technion.ac.il"},
+]
+keywords = ["eikonal", "wildfire", "differentiable", "implicit-differentiation", "finsler"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "torch>=1.12",
+    "numpy>=1.21",
+    "scipy>=1.7",
+    "matplotlib>=3.5",
+]
+
+[project.optional-dependencies]
+numba = ["numba>=0.56"]
+all = ["numba>=0.56", "gdown>=4.6"]
+
+[project.urls]
+Paper = "https://arxiv.org/abs/XXXX.XXXXX"
+Repository = "https://github.com/XXXX/differentiable-eikonal-wildfire"
+
+[tool.setuptools.packages.find]
+include = ["eikonal*"]

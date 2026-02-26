@@ -1,0 +1,11 @@
+# Core dependencies
+torch>=1.12
+numpy>=1.21
+scipy>=1.7
+matplotlib>=3.5
+
+# Acceleration (recommended)
+numba>=0.56
+
+# Data download (for Sim2Real-Fire dataset)
+gdown>=4.6
