@@ -18,6 +18,12 @@ Author: Barak Gahtan
 
 import os
 import sys
+from pathlib import Path
+
+# Allow running this file directly from any working directory.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 import time
 import numpy as np
 import torch
@@ -70,7 +76,7 @@ from eikonal.nn.encoder import FlexibleCovariateEncoder
 from eikonal.nn.regularization import compute_tv_regularization
 from eikonal.nn.config import DEVICE, TVMetricType
 
-from band_mse_config import (
+from config import (
     ExperimentConfig, compute_all_metrics, aggregate_metrics)
 
 
@@ -183,17 +189,26 @@ class SceneTrainer:
         self.config = config
         self.loader = loader
         self.device = torch.device(config.device)
-        self.adapter = CovariateAdapter()
+        self.adapter = CovariateAdapter(config.feature_group)
         self.model = None
         self.optimizer = None
         self.scheduler = None
         self.H = self.W = None
 
-    def setup_model(self, H, W, n_spatial_features=6):
+    def setup_model(self, H, W, n_spatial_features=None, n_global_features=None):
         self.H, self.W = H, W
+        if n_spatial_features is None:
+            n_spatial_features = len(self.adapter.spatial_feature_names)
+        if n_global_features is None:
+            n_global_features = len(self.adapter.global_feature_names)
+
+        print(f"Feature group: {self.config.feature_group}")
+        print(f"Spatial features ({n_spatial_features}): {self.adapter.spatial_feature_names}")
+        print(f"Global features ({n_global_features}): {self.adapter.global_feature_names}")
+
         self.model = FlexibleCovariateEncoder(
             n_spatial_features=n_spatial_features,
-            n_global_features=5,
+            n_global_features=n_global_features,
             hidden_channels=self.config.hidden_channels,
             num_cnn_layers=self.config.num_cnn_layers,
             mlp_hidden=self.config.mlp_hidden,

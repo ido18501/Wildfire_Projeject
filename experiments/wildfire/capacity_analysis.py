@@ -549,7 +549,7 @@ def run_diagnostic(config: DiagnosticConfig) -> Dict:
     warmup_numba()
     
     # Load data
-    data_root = '/path/to/sim2real_data'
+    data_root = '/home/shirb/sim2real_fire_data/simulation_data'
     print(f"\nLoading Sim2Real data from: {data_root}")
     loader = Sim2RealFireLoader(data_root)
     

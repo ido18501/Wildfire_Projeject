@@ -66,6 +66,9 @@ class ExperimentConfig:
     max_train: int = None
     max_eval: int = None
 
+    # Feature group for Sim2Real covariates
+    feature_group: str = "baseline"
+
     # Hardware
     device: str = "cuda:0"
     n_workers: int = 8

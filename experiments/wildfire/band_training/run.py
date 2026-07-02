@@ -31,6 +31,12 @@ Author: Barak Gahtan
 
 import os
 import sys
+from pathlib import Path
+
+# Allow running this file directly from any working directory.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 import json
 import time
 import argparse
@@ -48,8 +54,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from eikonal.forward.numba_cpu import warmup as warmup_numba
 from experiments.wildfire.sim2real_loader import Sim2RealFireLoader
 
-from band_mse_config import ExperimentConfig
-from band_mse_trainer import (
+from config import ExperimentConfig
+from trainer import (
     SceneTrainer, HAVE_BATCHED_CUDA, HAVE_CUDA_SINGLE, HAVE_NUMBA,
     warmup_parallel_bands, enable_cuda_single,
     _HAVE_SPARSE_ADJOINT, warmup_sparse_adjoint)
@@ -428,9 +434,9 @@ def run_multi_scene_experiment(train_scenes, test_scenes, data_root,
                     out.append(s)
         return out
 
-    tr = _load(train_scenes, 200, 0, 0.7)
-    va = _load(train_scenes, 50, 0.7, 0.85)
-    te = _load(test_scenes, 100, 0, 1)
+    tr = _load(train_scenes, 20, 0, 0.7)
+    va = _load(train_scenes, 5, 0.7, 0.85)
+    te = _load(test_scenes, 10, 0, 1)
     print(f"Loaded: {len(tr)}/{len(va)}/{len(te)}")
 
     history = trainer.train(tr, va, verbose=True)
@@ -497,6 +503,8 @@ def main():
                    help='Band width as fraction of max_time')
     p.add_argument('--band_stride', type=float, default=0.17,
                    help='Band stride as fraction of max_time')
+    p.add_argument('--n_time_bands', type=int, default=None,
+                   help='Convenience option: split fire into n non-overlapping time bands; sets band_width=band_stride=1/n')
     p.add_argument('--band_max_iter', type=int, default=20,
                    help='Max sweeping iterations for band solves (default 20)')
     p.add_argument('--gpus', default='0',
@@ -513,9 +521,18 @@ def main():
                    help='Max training fires per scene (subsample)')
     p.add_argument('--max_eval', type=int, default=None,
                    help='Max val/test fires per scene (subsample)')
+    p.add_argument('--feature_group', type=str, default='baseline',
+                   help='Feature group passed to CovariateAdapter')
     a = p.parse_args()
 
     gpus = [int(g) for g in a.gpus.split(',')]
+
+    if a.n_time_bands is not None:
+        if a.n_time_bands <= 0:
+            raise ValueError("--n_time_bands must be positive")
+        a.band_width = 1.0 / a.n_time_bands
+        a.band_stride = 1.0 / a.n_time_bands
+
     config = ExperimentConfig(
         n_epochs=a.epochs,
         learning_rate=a.lr,
@@ -532,6 +549,7 @@ def main():
         band_max_iter=a.band_max_iter,
         max_train=a.max_train,
         max_eval=a.max_eval,
+        feature_group=a.feature_group,
         seed=a.seed,
         device=f'cuda:{gpus[0]}',
     )
@@ -551,7 +569,7 @@ def main():
             print("  CUDA single-fire solver: FAILED (segfault), using CPU")
 
     # Re-import the flag after potential enable_cuda_single() call
-    from band_mse_trainer import HAVE_CUDA_SINGLE as _hcs
+    from trainer import HAVE_CUDA_SINGLE as _hcs
 
     fwd_label = ('CUDA single-fire' if _hcs
                  else 'Numba prange' if HAVE_NUMBA
@@ -562,6 +580,7 @@ def main():
     print(f"Model: CNN {a.num_cnn_layers}L×{a.hidden_channels}ch  "
           f"MLP {a.mlp_num_layers}L×{a.mlp_hidden}h")
     print(f"Band: w={a.band_width} s={a.band_stride}  "
+          f"n_time_bands={a.n_time_bands}  "
           f"band_max_iter={a.band_max_iter}")
     print(f"Reg: lambda_G={a.lambda_G} lambda_B={a.lambda_B}  "
           f"LR: {a.lr} sched_pat={a.scheduler_patience} "

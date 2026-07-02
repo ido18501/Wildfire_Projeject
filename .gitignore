@@ -8,3 +8,60 @@ dist/
 build/
 .DS_Store
 .idea/
+
+# Python/cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+*.egg-info/
+
+# Local envs
+.env
+.venv/
+venv/
+conda-meta/
+
+# Logs / temp / scratch
+*.log
+logs/
+*.tmp
+inspect_*.txt
+test_detach.*
+gpu_tmux_test.*
+priority_driver.log
+
+# Backup files
+*.bak
+*.bak_*
+*.bak*
+*~
+
+# Model checkpoints and generated predictions
+*.pt
+*.pth
+test_predictions*.npz
+model_best*.pt
+final_model_before_test.pt
+
+# Generated experiment/run directories
+runs*/
+small_runs/
+merge_timeband_smoke/
+priority_feature_search_*/
+inspect_multiscene*/
+inspect_timeband*/
+experiments_all_*/
+experiments_baseline_*/
+experiments_full_*/
+experiments_physics_plus_*/
+experiments_smoke_omitted/
+experiments/per_scene/
+experiments/per_scene_summary.json
+experiments/wildfire/small_subset/*/   # nested generated outputs, not scripts
+
+# Synthetic generated outputs
+experiments/synthetic/results/
+experiments/synthetic/figures/
+

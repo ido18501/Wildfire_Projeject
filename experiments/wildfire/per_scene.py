@@ -84,6 +84,8 @@ class ExperimentConfig:
     experiment_type: str = "per_scene"  # or "multi_scene"
     scenes: List[str] = None
     test_scenes: List[str] = None  # For multi-scene: held-out scenes
+    feature_group: str = "baseline"  # baseline or full
+    max_fires_per_scene: int = None  # limit for smoke tests
     
     # Data splits
     train_ratio: float = 0.70
@@ -289,7 +291,7 @@ class SceneTrainer:
         self.config = config
         self.loader = loader
         self.device = torch.device(config.device)
-        self.adapter = CovariateAdapter()
+        self.adapter = CovariateAdapter(feature_group=config.feature_group)
         
         # Will be set when we know grid size
         self.model = None
@@ -297,13 +299,22 @@ class SceneTrainer:
         self.H = None
         self.W = None
     
-    def setup_model(self, H: int, W: int, n_spatial_features: int = 6):
+    def setup_model(self, H: int, W: int, n_spatial_features: int = None, n_global_features: int = None):
         """Initialize model for given grid size."""
         self.H, self.W = H, W
+
+        if n_spatial_features is None:
+            n_spatial_features = self.adapter.spatial_channels
+        if n_global_features is None:
+            n_global_features = self.adapter.global_channels
+
+        print(f"Using feature_group={self.config.feature_group}: "
+              f"n_spatial_features={n_spatial_features}, "
+              f"n_global_features={n_global_features}")
         
         self.model = FlexibleCovariateEncoder(
             n_spatial_features=n_spatial_features,
-            n_global_features=5,
+            n_global_features=n_global_features,
             hidden_channels=self.config.hidden_channels,
             num_cnn_layers=self.config.num_cnn_layers,
             mlp_hidden=self.config.mlp_hidden,
@@ -674,6 +685,10 @@ def run_single_scene_experiment(
     # Split data
     np.random.seed(config.seed)
     np.random.shuffle(events)
+
+    if config.max_fires_per_scene is not None:
+        events = events[:config.max_fires_per_scene]
+        print(f"{scene_prefix}LIMITED to {len(events)} fires for smoke test")
     
     n_train = int(len(events) * config.train_ratio)
     n_val = int(len(events) * config.val_ratio)
@@ -1349,6 +1364,11 @@ def main():
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--patience', type=int, default=20)
+    parser.add_argument('--feature_group', type=str, default='baseline',
+                       choices=['baseline', 'physics_plus', 'full', 'all_available', 'topography_only', 'weather_only', 'fuel_veg_only', 'omitted_only', 'topo_weather', 'topo_fuel', 'topo_omitted', 'weather_fuel', 'weather_omitted', 'fuel_omitted', 'topo_weather_fuel', 'topo_weather_omitted', 'topo_fuel_omitted', 'weather_fuel_omitted', 'no_wind', 'no_dryness', 'no_weather', 'no_fuel_type', 'no_canopy', 'no_vegetation', 'no_topography', 'no_elevation', 'no_slope_aspect', 'no_precipitation', 'no_humidity', 'no_temperature', 'plus_fbfm40', 'plus_canopy_base_height', 'plus_fuel_disturbance', 'plus_fuel_vegetation_cover', 'plus_fuel_vegetation_height', 'plus_fuel_vegetation_type', 'plus_existing_vegetation_height', 'plus_succession_classes', 'plus_vegetation_condition_class', 'plus_vegetation_departure'],
+                       help='Feature set: baseline=original, full=selected expanded, all_available=all known Sim2Real rasters')
+    parser.add_argument('--max_fires_per_scene', type=int, default=None,
+                       help='Limit number of fires per scene for fast smoke tests')
     
     # Hardware
     parser.add_argument('--gpus', type=str, default='0',
@@ -1374,6 +1394,8 @@ def main():
         learning_rate=args.lr,
         batch_size=args.batch_size,
         patience=args.patience,
+        feature_group=args.feature_group,
+        max_fires_per_scene=args.max_fires_per_scene,
         n_workers=args.n_workers,
         seed=args.seed,
         device=f'cuda:{gpu_ids[0]}',

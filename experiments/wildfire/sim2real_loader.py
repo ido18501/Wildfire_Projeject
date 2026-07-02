@@ -58,38 +58,50 @@ class Sim2RealFireLoader:
         self.scenes = self._discover_scenes()
         
     def _discover_scenes(self) -> dict:
-        """Find all scenes and their fire events."""
+        """Find all scenes and their fire events. Handles flat and nested scene folders."""
         scenes = {}
-        
-        # Look for scene folders (pattern: XXXX_XXXXX)
+
         for entry in os.listdir(self.data_root):
-            scene_path = os.path.join(self.data_root, entry)
-            if not os.path.isdir(scene_path):
+            outer_path = os.path.join(self.data_root, entry)
+            if not os.path.isdir(outer_path):
                 continue
-            
-            # Check if it has the expected subfolders
-            mask_dir = os.path.join(scene_path, 'Satellite_Images_Mask')
-            weather_dir = os.path.join(scene_path, 'Weather_Data')
-            
-            if os.path.isdir(mask_dir) and os.path.isdir(weather_dir):
-                # Find all fire events in this scene
-                events = []
-                for event_folder in os.listdir(mask_dir):
-                    event_path = os.path.join(mask_dir, event_folder)
-                    if os.path.isdir(event_path):
-                        # Check corresponding weather file exists
-                        weather_file = os.path.join(weather_dir, f"{event_folder}.txt")
-                        if os.path.exists(weather_file):
-                            events.append(event_folder)
-                
-                if events:
-                    scenes[entry] = {
-                        'path': scene_path,
-                        'events': sorted(events)
-                    }
-        
+
+            candidate_paths = [outer_path]
+            for child in os.listdir(outer_path):
+                child_path = os.path.join(outer_path, child)
+                if os.path.isdir(child_path):
+                    candidate_paths.append(child_path)
+
+            scene_path = None
+            for cand in candidate_paths:
+                mask_dir = os.path.join(cand, "Satellite_Images_Mask")
+                weather_dir = os.path.join(cand, "Weather_Data")
+                if os.path.isdir(mask_dir) and os.path.isdir(weather_dir):
+                    scene_path = cand
+                    break
+
+            if scene_path is None:
+                continue
+
+            mask_dir = os.path.join(scene_path, "Satellite_Images_Mask")
+            weather_dir = os.path.join(scene_path, "Weather_Data")
+
+            events = []
+            for event_folder in os.listdir(mask_dir):
+                event_path = os.path.join(mask_dir, event_folder)
+                if os.path.isdir(event_path):
+                    weather_file = os.path.join(weather_dir, f"{event_folder}.txt")
+                    if os.path.exists(weather_file):
+                        events.append(event_folder)
+
+            if events:
+                scenes[entry] = {
+                    "path": scene_path,
+                    "events": sorted(events),
+                }
+
         return scenes
-    
+
     def list_scenarios(self, scene_filter: list = None) -> list:
         """Return list of (scene_id, event_id) tuples.
         
@@ -154,14 +166,23 @@ class Sim2RealFireLoader:
             'event_id': event_id
         }
     
-    def _load_tif_folder(self, folder: str, file_list: list) -> dict:
-        """Load specified TIF files from a folder."""
+    def _load_tif_folder(self, folder: str, file_list: list = None) -> dict:
+        """Load all TIF files from a folder.
+
+        file_list is kept for backward compatibility but ignored.
+        """
         data = {}
-        for filename in file_list:
+        if not os.path.isdir(folder):
+            return data
+
+        for filename in sorted(os.listdir(folder)):
+            if not filename.lower().endswith(".tif"):
+                continue
+
             filepath = os.path.join(folder, filename)
-            if os.path.exists(filepath):
-                key = filename.replace('.tif', '').lower()
-                data[key] = self._load_tif(filepath)
+            key = filename.replace(".tif", "").lower()
+            data[key] = self._load_tif(filepath)
+
         return data
     
     def _load_tif(self, filepath: str) -> np.ndarray:
@@ -213,7 +234,7 @@ class Sim2RealFireLoader:
         Columns: Year Month Day HHMM Temp Humidity Precip WindSpeed WindDir Extra
         
         Returns:
-            weather: [T, 5] array with (temp, humidity, wind_speed, wind_dir_sin, wind_dir_cos)
+            weather: [T, 6] array with (temp, humidity, wind_speed, wind_dir_sin, wind_dir_cos, precip)
         """
         data = []
         with open(filepath, 'r') as f:
@@ -222,6 +243,7 @@ class Sim2RealFireLoader:
                 if len(parts) >= 9:
                     temp = float(parts[4])
                     humidity = float(parts[5])
+                    precip = float(parts[6])
                     wind_speed = float(parts[7])
                     wind_dir_deg = float(parts[8])
                     
@@ -230,7 +252,7 @@ class Sim2RealFireLoader:
                     wind_dir_sin = np.sin(wind_dir_rad)
                     wind_dir_cos = np.cos(wind_dir_rad)
                     
-                    data.append([temp, humidity, wind_speed, wind_dir_sin, wind_dir_cos])
+                    data.append([temp, humidity, wind_speed, wind_dir_sin, wind_dir_cos, precip])
         
         return np.array(data, dtype=np.float32)
 
@@ -270,107 +292,235 @@ def find_ignition_point(masks: np.ndarray) -> tuple:
 
 class CovariateAdapter:
     """Convert Sim2Real covariates to model input format.
-    
-    Uses robust normalization (median/IQR) matching the fire_training pipeline.
+
+    feature_group:
+        baseline = original 6 spatial / 5 global features
+        full     = expanded available Sim2Real features
     """
-    
-    def __init__(self, spatial_channels: int = 6, global_channels: int = 5):
-        self.spatial_channels = spatial_channels
-        self.global_channels = global_channels
-    
+
+    def __init__(self, feature_group: str = "baseline"):
+        self.feature_group = feature_group
+
+        full_spatial = [
+            "elevation",
+            "slope",
+            "aspect_sin",
+            "aspect_cos",
+            "fbfm13",
+            "canopy_cover",
+            "canopy_height",
+            "canopy_bulk_density",
+            "existing_vegetation_type",
+            "existing_vegetation_cover",
+        ]
+
+        all_available_spatial = [
+            "elevation",
+            "slope",
+            "aspect_sin",
+            "aspect_cos",
+            "fbfm13",
+            "fbfm40",
+            "canopy_cover",
+            "canopy_height",
+            "canopy_bulk_density",
+            "canopy_base_height",
+            "fuel_disturbance",
+            "fuel_vegetation_cover",
+            "fuel_vegetation_height",
+            "fuel_vegetation_type",
+            "existing_vegetation_type",
+            "existing_vegetation_cover",
+            "existing_vegetation_height",
+            "succession_classes",
+            "vegetation_condition_class",
+            "vegetation_departure",
+        ]
+
+        full_global = [
+            "temperature",
+            "humidity",
+            "wind_speed",
+            "wind_dir_sin",
+            "wind_dir_cos",
+            "precipitation",
+        ]
+
+        topo_spatial = ["elevation", "slope", "aspect_sin", "aspect_cos"]
+        topo_no_elev = ["slope", "aspect_sin", "aspect_cos"]
+        topo_no_slope_aspect = ["elevation"]
+
+        wind_global = ["wind_speed", "wind_dir_sin", "wind_dir_cos"]
+        dryness_global = ["temperature", "humidity", "precipitation"]
+        weather_global = dryness_global + wind_global
+
+        fuel_type_spatial = ["fbfm13"]
+        canopy_spatial = ["canopy_cover", "canopy_height", "canopy_bulk_density"]
+        veg_spatial = ["existing_vegetation_type", "existing_vegetation_cover"]
+        fuel_veg_spatial = fuel_type_spatial + canopy_spatial + veg_spatial
+
+        omitted_spatial = [
+            "fbfm40",
+            "canopy_base_height",
+            "fuel_disturbance",
+            "fuel_vegetation_cover",
+            "fuel_vegetation_height",
+            "fuel_vegetation_type",
+            "existing_vegetation_height",
+            "succession_classes",
+            "vegetation_condition_class",
+            "vegetation_departure",
+        ]
+
+        physics_spatial = topo_spatial + fuel_veg_spatial
+        all_spatial = physics_spatial + omitted_spatial
+
+        groups = {
+            # references
+            "baseline": (
+                ["elevation", "slope", "aspect_sin", "aspect_cos", "fbfm13", "canopy_cover"],
+                ["temperature", "humidity", "wind_speed", "wind_dir_sin", "wind_dir_cos"],
+            ),
+            "physics_plus": (physics_spatial, weather_global),
+            "full": (physics_spatial, weather_global),
+            "all_available": (all_spatial, weather_global),
+
+            # single blocks
+            "topography_only": (topo_spatial, ["constant_global"]),
+            "weather_only": (["constant_spatial"], weather_global),
+            "fuel_veg_only": (fuel_veg_spatial, ["constant_global"]),
+            "omitted_only": (omitted_spatial, ["constant_global"]),
+
+            # block pairs
+            "topo_weather": (topo_spatial, weather_global),
+            "topo_fuel": (topo_spatial + fuel_veg_spatial, ["constant_global"]),
+            "topo_omitted": (topo_spatial + omitted_spatial, ["constant_global"]),
+            "weather_fuel": (fuel_veg_spatial, weather_global),
+            "weather_omitted": (omitted_spatial, weather_global),
+            "fuel_omitted": (fuel_veg_spatial + omitted_spatial, ["constant_global"]),
+
+            # block triples
+            "topo_weather_fuel": (topo_spatial + fuel_veg_spatial, weather_global),
+            "topo_weather_omitted": (topo_spatial + omitted_spatial, weather_global),
+            "topo_fuel_omitted": (topo_spatial + fuel_veg_spatial + omitted_spatial, ["constant_global"]),
+            "weather_fuel_omitted": (fuel_veg_spatial + omitted_spatial, weather_global),
+
+            # WRF-guided removals from physics_plus
+            "no_wind": (physics_spatial, dryness_global),
+            "no_dryness": (physics_spatial, wind_global),
+            "no_weather": (physics_spatial, ["constant_global"]),
+            "no_fuel_type": (topo_spatial + canopy_spatial + veg_spatial, weather_global),
+            "no_canopy": (topo_spatial + fuel_type_spatial + veg_spatial, weather_global),
+            "no_vegetation": (topo_spatial + fuel_type_spatial + canopy_spatial, weather_global),
+            "no_topography": (fuel_veg_spatial, weather_global),
+            "no_elevation": (topo_no_elev + fuel_veg_spatial, weather_global),
+            "no_slope_aspect": (topo_no_slope_aspect + fuel_veg_spatial, weather_global),
+            "no_precipitation": (physics_spatial, ["temperature", "humidity", "wind_speed", "wind_dir_sin", "wind_dir_cos"]),
+            "no_humidity": (physics_spatial, ["temperature", "precipitation", "wind_speed", "wind_dir_sin", "wind_dir_cos"]),
+            "no_temperature": (physics_spatial, ["humidity", "precipitation", "wind_speed", "wind_dir_sin", "wind_dir_cos"]),
+
+            # add-one omitted features onto physics_plus
+            "plus_fbfm40": (physics_spatial + ["fbfm40"], weather_global),
+            "plus_canopy_base_height": (physics_spatial + ["canopy_base_height"], weather_global),
+            "plus_fuel_disturbance": (physics_spatial + ["fuel_disturbance"], weather_global),
+            "plus_fuel_vegetation_cover": (physics_spatial + ["fuel_vegetation_cover"], weather_global),
+            "plus_fuel_vegetation_height": (physics_spatial + ["fuel_vegetation_height"], weather_global),
+            "plus_fuel_vegetation_type": (physics_spatial + ["fuel_vegetation_type"], weather_global),
+            "plus_existing_vegetation_height": (physics_spatial + ["existing_vegetation_height"], weather_global),
+            "plus_succession_classes": (physics_spatial + ["succession_classes"], weather_global),
+            "plus_vegetation_condition_class": (physics_spatial + ["vegetation_condition_class"], weather_global),
+            "plus_vegetation_departure": (physics_spatial + ["vegetation_departure"], weather_global),
+        }
+
+        if feature_group not in groups:
+            raise ValueError(f"Unknown feature_group={feature_group}. Available: {sorted(groups)}")
+
+        self.spatial_feature_names, self.global_feature_names = groups[feature_group]
+
+        self.spatial_channels = len(self.spatial_feature_names)
+        self.global_channels = len(self.global_feature_names)
+
     def __call__(self, scenario: dict) -> tuple:
-        """
-        Convert scenario to (spatial_features, global_features).
-        
-        Returns:
-            spatial_feat: [C_spatial, H, W] tensor
-            global_feat: [C_global] tensor (time-averaged weather, normalized)
-        """
         import torch
-        
-        # Get grid size from elevation
-        elev = scenario['topography'].get('elevation')
+
+        elev = scenario["topography"].get("elevation")
         if elev is None:
             raise ValueError("Elevation data required")
+
         H, W = elev.shape
-        
-        # Build spatial features with ROBUST normalization
-        spatial = np.zeros((self.spatial_channels, H, W), dtype=np.float32)
-        
-        # Channel 0: Elevation (robust normalized)
-        spatial[0] = self._robust_normalize(elev)
-        
-        # Channel 1: Slope (robust normalized)
-        slope = scenario['topography'].get('slope', np.zeros((H, W)))
-        spatial[1] = self._robust_normalize(slope)
-        
-        # Channel 2-3: Aspect as sin/cos (already bounded [-1, 1])
-        aspect = scenario['topography'].get('aspect', np.zeros((H, W)))
-        aspect_rad = np.deg2rad(aspect)
-        spatial[2] = np.sin(aspect_rad)
-        spatial[3] = np.cos(aspect_rad)
-        
-        # Channel 4: Fuel model (robust normalized)
-        fuel = scenario['fuel'].get('fbfm13', np.ones((H, W)))
-        spatial[4] = self._robust_normalize(fuel)
-        
-        # Channel 5: Canopy cover (robust normalized)
-        canopy = scenario['fuel'].get('canopy_cover', np.zeros((H, W)))
-        spatial[5] = self._robust_normalize(canopy)
-        
-        # Build global features (time-averaged weather, normalized with known scales)
-        weather = scenario['weather']  # [T, 5]: temp, humidity, wind_speed, wind_sin, wind_cos
-        global_feat = weather.mean(axis=0)  # [5] average over time
-        
-        # Normalize using domain knowledge (similar to your KNOWN_SCALES approach)
-        # [0]: temp (Fahrenheit) - typical range 60-90, use mean=75, std=15
-        global_feat[0] = (global_feat[0] - 75) / 15
-        # [1]: humidity (0-100) - use mean=50, std=25
-        global_feat[1] = (global_feat[1] - 50) / 25
-        # [2]: wind_speed (mph) - typical range 0-30, use mean=10, std=8
-        global_feat[2] = (global_feat[2] - 10) / 8
-        # [3,4]: wind_sin, wind_cos - already in [-1, 1], keep as-is
-        # (They're already normalized angular components)
-        
-        # Clip to prevent extreme values (matching your clip_range=10)
+        spatial_list = []
+
+        for name in self.spatial_feature_names:
+            if name == "elevation":
+                arr = elev
+                spatial_list.append(self._robust_normalize(arr))
+
+            elif name == "slope":
+                arr = scenario["topography"].get("slope", np.zeros((H, W), dtype=np.float32))
+                spatial_list.append(self._robust_normalize(arr))
+
+            elif name == "aspect_sin":
+                aspect = scenario["topography"].get("aspect", np.zeros((H, W), dtype=np.float32))
+                spatial_list.append(np.sin(np.deg2rad(aspect)).astype(np.float32))
+
+            elif name == "aspect_cos":
+                aspect = scenario["topography"].get("aspect", np.zeros((H, W), dtype=np.float32))
+                spatial_list.append(np.cos(np.deg2rad(aspect)).astype(np.float32))
+
+            elif name in scenario.get("fuel", {}):
+                spatial_list.append(self._robust_normalize(scenario["fuel"][name]))
+
+            elif name in scenario.get("vegetation", {}):
+                spatial_list.append(self._robust_normalize(scenario["vegetation"][name]))
+
+            else:
+                spatial_list.append(np.zeros((H, W), dtype=np.float32))
+
+        spatial = np.stack(spatial_list, axis=0).astype(np.float32)
+
+        weather = scenario["weather"]
+        global_raw = weather.mean(axis=0)
+
+        global_values = {
+            "temperature": (global_raw[0] - 75) / 15,
+            "humidity": (global_raw[1] - 50) / 25,
+            "wind_speed": (global_raw[2] - 10) / 8,
+            "wind_dir_sin": global_raw[3],
+            "wind_dir_cos": global_raw[4],
+            "precipitation": global_raw[5] if len(global_raw) > 5 else 0.0,
+            "constant_global": 0.0,
+        }
+
+        global_feat = np.array(
+            [global_values[name] for name in self.global_feature_names],
+            dtype=np.float32
+        )
+
         global_feat = np.clip(global_feat, -10, 10)
-        
-        # Handle any NaNs
         global_feat = np.nan_to_num(global_feat, nan=0.0, posinf=0.0, neginf=0.0)
-        
+
         return torch.tensor(spatial), torch.tensor(global_feat)
-    
+
     def _robust_normalize(self, arr: np.ndarray, clip_range: float = 10.0) -> np.ndarray:
-        """
-        Robustly normalize array using median/IQR (matching fire_training pipeline).
-        
-        This is more robust to outliers than min-max normalization.
-        """
         arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
-        
-        # Check for constant array
+
         if arr.std() < 1e-10:
-            return np.zeros_like(arr)
-        
-        # Robust normalization using median and IQR
+            return np.zeros_like(arr, dtype=np.float32)
+
         median = np.median(arr)
         q75, q25 = np.percentile(arr, [75, 25])
         iqr = q75 - q25
-        
+
         if iqr > 1e-10:
-            # Scale by IQR (0.7413 factor approximates std for normal distribution)
             normalized = (arr - median) / (iqr * 0.7413 + 1e-10)
         else:
-            # Fall back to MAD (median absolute deviation)
             mad = np.median(np.abs(arr - median))
             if mad > 1e-10:
                 normalized = (arr - median) / (mad * 1.4826 + 1e-10)
             else:
                 normalized = arr - median
-        
-        # Clip to prevent extreme values
+
         normalized = np.clip(normalized, -clip_range, clip_range)
-        
         return normalized.astype(np.float32)
 
 

@@ -279,8 +279,12 @@ class OptimizedTrainer:
             self.optimizer, mode='min', factor=0.5, patience=10
         )
         
-        # Warmup solvers
-        warmup_v3()
+        # Warmup CUDA solver if available. If CUDA/NVVM is unavailable,
+        # continue with CPU/joblib solver instead of crashing.
+        try:
+            warmup_v3()
+        except Exception as e:
+            print(f"Warning: CUDA batched solver warmup failed; continuing with CPU/joblib solver. Reason: {e}")
     
     def compute_tv_loss(self, G_local: Tensor, B_local: Tensor) -> Tensor:
         """Total Variation regularization - EXACT match to original trainer.py"""
@@ -424,8 +428,18 @@ class OptimizedTrainer:
         """Train for one epoch."""
         losses = {'data_loss': [], 'tv_loss': [], 'total_loss': []}
         
-        for batch in dataloader:
+        import time
+        epoch_t0 = time.perf_counter()
+        for batch_idx, batch in enumerate(dataloader, start=1):
             step_losses = self.train_step(batch)
+            if batch_idx == 1 or batch_idx % 25 == 0 or batch_idx == len(dataloader):
+                dt = time.perf_counter() - epoch_t0
+                print(
+                    f"    batch {batch_idx}/{len(dataloader)} "
+                    f"loss={step_losses.get('total_loss', float('nan')):.4f} "
+                    f"elapsed={dt:.1f}s",
+                    flush=True,
+                )
             for k, v in step_losses.items():
                 losses[k].append(v)
         
@@ -639,7 +653,7 @@ class OptimizedTrainer:
             'lr': [],
         }
         
-        best_loss = float('inf')
+        best_val_corr = -float('inf')
         patience_counter = 0
         
         print(f"\n{'='*70}")
@@ -690,9 +704,10 @@ class OptimizedTrainer:
                   f"lr={self.optimizer.param_groups[0]['lr']:.2e} | "
                   f"Time: {t_epoch:.1f}s")
             
-            # Save best model based on loss (matches original)
-            if total_loss < best_loss:
-                best_loss = total_loss
+            # Save best model based on full-fire validation correlation.
+            # This matches the paper protocol: early stopping/checkpointing by validation performance.
+            if np.isfinite(val_corr) and val_corr > best_val_corr:
+                best_val_corr = val_corr
                 patience_counter = 0
                 if save_path:
                     torch.save(self.base_model.state_dict(), save_path)
@@ -810,6 +825,7 @@ def run_optimized_experiment(
     val_split: float = 0.15,
     metric_type: TVMetricType = TVMetricType.LOG_EUCLIDEAN,
     max_fires_per_scene: int = None,
+    feature_group: str = "baseline",
 ):
     """Run optimized cross-scene experiment."""
     
@@ -829,6 +845,7 @@ def run_optimized_experiment(
     print(f"Train scenes: {train_scenes}")
     print(f"Test scenes: {test_scenes}")
     print(f"Patch size: {patch_size}, Stride: {patch_stride}")
+    print(f"Feature group: {feature_group}")
     print(f"Batch size: {batch_size}")
     print(f"GPUs: {n_gpus}, Workers: {num_workers}, Solver jobs: {n_solver_jobs}")
     print(f"lambda_G: {lambda_G}, lambda_B: {lambda_B}, TV metric: {metric_type.value}")
@@ -837,7 +854,7 @@ def run_optimized_experiment(
     print("=" * 70)
     
     loader = Sim2RealFireLoader(data_root)
-    adapter = CovariateAdapter()
+    adapter = CovariateAdapter(feature_group=feature_group)
     
     # ==========================================================================
     # Extract training patches
@@ -1022,6 +1039,7 @@ def run_optimized_experiment(
             'test_scenes': test_scenes,
             'patch_size': patch_size,
             'patch_stride': patch_stride,
+            'feature_group': feature_group,
             'batch_size': batch_size,
             'n_gpus': n_gpus,
             'lambda_G': lambda_G,
@@ -1115,6 +1133,8 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max_fires_per_scene", type=int, default=None,
                         help="Limit fires per scene for testing (default: no limit)")
+    parser.add_argument("--feature_group", type=str, default="baseline",
+                        help="Covariate feature group: baseline, topo_weather_omitted, full, etc.")
     
     args = parser.parse_args()
     
@@ -1135,4 +1155,5 @@ if __name__ == "__main__":
         n_solver_jobs=args.n_solver_jobs,
         seed=args.seed,
         max_fires_per_scene=args.max_fires_per_scene,
+        feature_group=args.feature_group,
     )
