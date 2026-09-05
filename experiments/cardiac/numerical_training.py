@@ -35,11 +35,13 @@ def fit_numerical(dataset, train_ids, latency_ms, initial_speeds, isotropic,
     """Fit one tissue model shared by every case; gradients traverse the solver."""
     started = perf_counter()
     initial = float(initial_speeds[0]) if isotropic else initial_speeds
-    model = SharedSpeedModel(initial, isotropic=isotropic)
-    before = model.speeds_xyz.detach().numpy().copy()
+    device = torch.device("cuda" if backend == "cuda" else "cpu")
+    model = SharedSpeedModel(initial, isotropic=isotropic).to(device)
+    before = model.speeds_xyz.detach().cpu().numpy().copy()
     samples = sample_training_voxels(dataset, train_ids, samples_per_case, seed)
-    target_samples = [torch.from_numpy(np.array(dataset.activation_nzyx[i].ravel()[j], copy=True))
+    target_samples = [torch.from_numpy(np.array(dataset.activation_nzyx[i].ravel()[j], copy=True)).to(device)
                       for i, j in zip(train_ids, samples)]
+    samples = [torch.as_tensor(j, dtype=torch.long, device=device) for j in samples]
     # L-BFGS needs few iterations for one/three shared log-speeds. Every closure
     # runs actual volumetric sweeps and their implicit backward pass per case.
     optimizer = torch.optim.LBFGS(model.parameters(), lr=1.0, max_iter=max_iter,
@@ -60,7 +62,7 @@ def fit_numerical(dataset, train_ids, latency_ms, initial_speeds, isotropic,
                 raise FloatingPointError("Nonfinite numerical training loss")
             loss.backward()
             value += float(loss.detach())
-        gradient = model.log_speeds.grad.detach().numpy().copy()
+        gradient = model.log_speeds.grad.detach().cpu().numpy().copy()
         if not np.isfinite(gradient).all():
             raise FloatingPointError("Nonfinite log-speed gradient")
         history.append({"evaluation": len(history), "mse_ms2": value,
@@ -73,7 +75,7 @@ def fit_numerical(dataset, train_ids, latency_ms, initial_speeds, isotropic,
 
     optimizer.step(closure)
     closure()  # Explicitly evaluate the final accepted parameters.
-    after = model.speeds_xyz.detach().numpy().copy()
+    after = model.speeds_xyz.detach().cpu().numpy().copy()
     if not np.isfinite(after).all() or (after <= 0).any():
         raise FloatingPointError("Invalid fitted propagation speeds")
     changed = not np.allclose(before, after, rtol=1e-8, atol=1e-10)
@@ -214,7 +216,7 @@ def main():
     parser.add_argument("--max-iter", type=int, default=25)
     parser.add_argument("--samples-per-case", type=int, default=0, help="Numerical training loss voxels; 0 uses full volumes")
     parser.add_argument("--seed", type=int, default=20260905)
-    parser.add_argument("--backend", choices=("auto", "python", "numba"), default="auto")
+    parser.add_argument("--backend", choices=("auto", "python", "numba", "cuda"), default="auto")
     parser.add_argument("--refine-factor", type=int, default=2, help="Refine one held-out source at fixed physical geometry")
     parser.add_argument("--output")
     args = parser.parse_args()

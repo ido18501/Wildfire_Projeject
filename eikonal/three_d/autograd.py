@@ -75,6 +75,9 @@ def solve_eikonal(speeds_xyz, shape_zyx, source_zyx, spacing_xyz=(0.8, 0.8, 0.8)
     opposite-neighbor min ties, use the forward's deterministic branch
     derivative. Sources, spacing and grid geometry are fixed metadata.
     """
+    if backend == "cuda":
+        from .cuda import solve_eikonal_cuda
+        return solve_eikonal_cuda(speeds_xyz, shape_zyx, source_zyx, spacing_xyz)
     return _DiagonalArrival.apply(speeds_xyz, shape_zyx, source_zyx, spacing_xyz, backend)
 
 
