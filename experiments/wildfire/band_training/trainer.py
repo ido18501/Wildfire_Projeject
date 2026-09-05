@@ -240,21 +240,50 @@ class SceneTrainer:
             data = self.loader.load_scenario(scene_id, event_id)
             spatial_feat, global_feat = self.adapter(data)
             arrival = extract_arrival_times(data['masks'], data['timestamps'])
-            ignition = find_ignition_point(data['masks'])
-            if ignition is None:
+
+            # Paper-faithful multi-source masking:
+            # Use the exact first non-empty burned mask as the T=0 source set.
+            # This preserves multiple disconnected initial burned components
+            # instead of collapsing them to a single centroid-based 3x3 patch.
+            first_burn_frame = None
+            for t_idx in range(len(data['masks'])):
+                if np.asarray(data['masks'][t_idx]).any():
+                    first_burn_frame = t_idx
+                    break
+            if first_burn_frame is None:
                 return None
+
             H, W = arrival.shape
-            si, sj = ignition
-            source_mask = np.zeros((H, W), dtype=bool)
-            source_mask[max(0, si - 1):min(H, si + 2),
-                        max(0, sj - 1):min(W, sj + 2)] = True
+            first_frame_mask = np.asarray(
+                data['masks'][first_burn_frame], dtype=bool)
+            if first_frame_mask.shape != (H, W):
+                return None
+
+            source_mask = first_frame_mask.copy()
+
+            # Keep the old centroid-based 3x3 source only for diagnostics
+            # and old-vs-new comparisons. It is no longer used for solving.
+            ignition = find_ignition_point(data['masks'])
+            centroid_source_mask = np.zeros((H, W), dtype=bool)
+            if ignition is not None:
+                si, sj = ignition
+                centroid_source_mask[max(0, si - 1):min(H, si + 2),
+                                     max(0, sj - 1):min(W, sj + 2)] = True
+            else:
+                si, sj = -1, -1
+
             return {
                 'spatial_feat': spatial_feat,
                 'global_feat': global_feat,
                 'arrival_times': arrival,
                 'source_mask': source_mask,
                 'valid_mask': np.isfinite(arrival),
-                'ignition': (si, sj),
+                'ignition': (si, sj) if ignition is not None else None,
+                'source_mask_first_frame': first_frame_mask,
+                'source_mask_centroid_3x3': centroid_source_mask,
+                'first_burn_frame': int(first_burn_frame),
+                'first_burn_area': int(first_frame_mask.sum()),
+                'source_policy': 'first_frame_exact',
                 'scene_id': scene_id,
                 'event_id': event_id,
             }
