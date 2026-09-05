@@ -65,3 +65,7 @@ experiments/wildfire/small_subset/*/   # nested generated outputs, not scripts
 experiments/synthetic/results/
 experiments/synthetic/figures/
 
+# Local external cardiac data and experiment output (never version raw data).
+local_data/
+runs_3d/
+
