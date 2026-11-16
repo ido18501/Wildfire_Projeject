@@ -1,14 +1,12 @@
-# Wildfire Simulation with Differentiable Randers-Finsler Eikonal Solvers
+# Differentiable Eikonal Models for Wildfire Simulation
 
-**Barak Gahtan, Jacob Shpund, Alex M. Bronstein**
+Research code for modeling wildfire propagation with differentiable Randers-Finsler Eikonal solvers.
 
-Technion – Israel Institute of Technology, The Hebrew University of Jerusalem, ISTA
+Based on the framework by **Barak Gahtan, Jacob Shpund, and Alex M. Bronstein**.
 
-[Paper (arXiv)](https://arxiv.org/abs/XXXX.XXXXX)
+## Overview
 
----
-
-This repository provides the code accompanying the paper *Wildfire Simulation with Differentiable Randers-Finsler Eikonal Solvers*. The framework solves and differentiates through the Randers-Finsler eikonal equation
+The framework solves and differentiates through the Randers-Finsler eikonal equation
 
 $$(\nabla T - \mathbf{b})^\top \mathbf{G}^{-1} (\nabla T - \mathbf{b}) = 1,$$
 
@@ -19,8 +17,8 @@ A neural network encoder maps environmental covariates (terrain, fuel, weather) 
 ## Installation
 
 ```bash
-git clone https://github.com/XXXX/differentiable-eikonal-wildfire.git
-cd differentiable-eikonal-wildfire
+git clone https://github.com/ido18501/Wildfire_Projeject.git
+cd Wildfire_Projeject
 pip install -e .
 ```
 
@@ -61,7 +59,7 @@ dL_dG, dL_dB = backward_pass(T, dL_dT, problem)
 ## Repository Structure
 
 ```
-differentiable-eikonal-wildfire/
+Wildfire_Projeject/
 │
 ├── eikonal/                               Core library
 │   ├── forward/
@@ -102,7 +100,7 @@ differentiable-eikonal-wildfire/
 │       ├── plot_forward_benchmark.py     Generate forward timing plot
 │       └── plot_backward_benchmark.py    Generate backward timing plot
 │
-├── visualization/                         Paper figure generation
+├── visualization/                         Figure generation
 │   ├── plot_per_scene_results.py         Per-scene summary (Fig 6)
 │   ├── plot_qualitative.py              Qualitative examples (Fig 7)
 │   ├── plot_stencil_boundaries.py       Stencil structure (Fig 3)
@@ -122,11 +120,11 @@ differentiable-eikonal-wildfire/
 └── README.md
 ```
 
-## Reproducing Paper Results
+## Experiments and result scripts
 
-The table below maps each paper section to the code that produces its results. All commands assume the repository root as working directory and that the `eikonal` package is installed (`pip install -e .`).
+The table below maps the reference experiments to the scripts used to run them. All commands assume the repository root as working directory and that the `eikonal` package is installed (`pip install -e .`).
 
-| Paper Section | Result | Command |
+| Experiment | Result | Command |
 |---|---|---|
 | **Section 5.1** – Forward Solver | Table 1, Figs A1–A9 | `cd experiments/synthetic && python run_experiments.py --phase A` |
 | **Section 5.2** – Gradient Verification | Table 2, Figs B1–B9 | `cd experiments/synthetic && python run_experiments.py --phase B` |
